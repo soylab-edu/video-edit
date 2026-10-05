@@ -52,7 +52,7 @@ const until = async (fn) => {
   }
   throw new Error("Timed out");
 };
-async function fixture(t, scenario) {
+async function fixture(t, scenario, overrides = {}) {
   const work = await fs.mkdtemp(path.join(os.tmpdir(), "moa-task-"));
   let calls = 0,
     prepared = 0,
@@ -72,6 +72,7 @@ async function fixture(t, scenario) {
         return { thread: { id: "planner" } };
       }
       if (method === "turn/start") {
+        this.turnInput = JSON.parse(params.input[0].text);
         queueMicrotask(() =>
           scenario(this).catch((e) => {
             this.failure = e;
@@ -122,14 +123,32 @@ async function fixture(t, scenario) {
       prepared++;
       return { "moa://ref/0": "https://editor.example.com/share/approved" };
     },
+    ...overrides,
   };
   const tasks = createCodexTasks(config);
   t.after(async () => {
+    await tasks.cancelAll("alice");
+    await new Promise((resolve) => setTimeout(resolve, 30));
     await fs.rm(work, { recursive: true, force: true });
   });
   return {
     tasks,
     config,
+    async persisted(id, state) {
+      for (let i = 0; i < 200; i++) {
+        try {
+          const saved = JSON.parse(
+            await fs.readFile(
+              path.join(work, "alice", "codex-tasks", id + ".json"),
+              "utf8",
+            ),
+          );
+          if (saved.state === state) return;
+        } catch {}
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      throw new Error("Task was not persisted");
+    },
     get calls() {
       return calls;
     },
@@ -144,6 +163,189 @@ async function fixture(t, scenario) {
     },
   };
 }
+test("a finished planner turn retains the pending report and resumes exact approved work only once", async (t) => {
+  let turns = 0;
+  const f = await fixture(t, async (rpc) => {
+    turns++;
+    if (turns === 1) {
+      void rpc.request("moa_review", report);
+      await until(() => Boolean(f.tasks.get("alice", job.id).report));
+      rpc.finish();
+    } else {
+      assert.equal(rpc.turnInput.approvedReport.status, "approved");
+      assert.deepEqual(rpc.turnInput.approvedReport.calls, report.calls);
+      assert.equal(
+        (await rpc.request("editor_magnific_images_generate", args)).success,
+        true,
+      );
+      assert.equal(
+        (await rpc.request("editor_magnific_images_generate", args)).success,
+        false,
+      );
+      rpc.finish();
+    }
+  });
+  const job = await f.tasks.start("alice", input);
+  await until(
+    () =>
+      f.tasks.get("alice", job.id).state === "awaiting-approval" &&
+      f.planner.options &&
+      f.tasks.get("alice", job.id).report,
+  );
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(f.calls, 0);
+  const review = f.tasks.get("alice", job.id).report;
+  const approval = {
+    reportId: review.id,
+    approved: true,
+    acknowledgeEstimatedCost: true,
+  };
+  const results = await Promise.allSettled([
+    f.tasks.approve("alice", job.id, approval),
+    f.tasks.approve("alice", job.id, approval),
+  ]);
+  assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
+  await until(() => f.tasks.get("alice", job.id).state === "completed");
+  assert.equal(f.planner.failure, undefined);
+  assert.equal(turns, 2);
+  assert.equal(f.calls, 1);
+});
+test("native Runway uploads require their own exact approval and run before generation, once", async (t) => {
+  const events = [];
+  const runwayTool = {
+    ...tool,
+    name: "runway.generate_video",
+    providerId: "runway",
+  };
+  const uploadArgs = { reference: "moa://ref/0" };
+  const videoArgs = {
+    model: "hailuo-3",
+    duration: 5,
+    promptText: "Continue",
+    startFrame: { url: "moa://ref/0" },
+  };
+  const uploadReport = {
+    summary: "One approved frame upload and one five-second video",
+    followUp: "",
+    calls: [
+      {
+        tool: "editor_moa_runway_upload_reference",
+        arguments: uploadArgs,
+        purpose: "Upload selected frame",
+        estimatedCredits: null,
+        pricingSource: "Unverified",
+      },
+      {
+        tool: "editor_runway_generate_video",
+        arguments: videoArgs,
+        purpose: "Generate 5s",
+        estimatedCredits: null,
+        pricingSource: "Unverified",
+      },
+    ],
+  };
+  const f = await fixture(
+    t,
+    async (rpc) => {
+      assert.equal(
+        (await rpc.request("editor_moa_runway_upload_reference", uploadArgs))
+          .success,
+        false,
+      );
+      await rpc.request("moa_review", uploadReport);
+      assert.equal(
+        (
+          await rpc.request("editor_moa_runway_upload_reference", {
+            reference: "moa://ref/1",
+          })
+        ).success,
+        false,
+      );
+      assert.equal(
+        (await rpc.request("editor_moa_runway_upload_reference", uploadArgs))
+          .success,
+        true,
+      );
+      assert.equal(
+        (await rpc.request("editor_moa_runway_upload_reference", uploadArgs))
+          .success,
+        false,
+      );
+      assert.equal(
+        (await rpc.request("editor_runway_generate_video", videoArgs)).success,
+        true,
+      );
+      rpc.finish();
+    },
+    {
+      inventory: async () => ({
+        apps: [{ id: "runway", executionReady: true }],
+        tools: [
+          runwayTool,
+          ...["runway.init_upload", "runway.complete_upload"].map((name) => ({
+            ...runwayTool,
+            name,
+          })),
+        ],
+      }),
+      prepareReferenceFile: async (task, ref) => {
+        events.push("extract");
+        assert.equal(ref.assetId, "test");
+        return { file: "owned-frame.jpg", mimeType: "image/jpeg" };
+      },
+      uploadReference: async ({ file, ensureActive }) => {
+        ensureActive();
+        assert.equal(file, "owned-frame.jpg");
+        events.push("upload");
+        return "https://cdn.example.com/approved.jpg";
+      },
+      executor: async () => ({
+        threadId: "executor",
+        rpc: {
+          close: async () => {},
+          call: async (_, params) => {
+            events.push("generate");
+            assert.equal(
+              params.arguments.startFrame.url,
+              "https://cdn.example.com/approved.jpg",
+            );
+            return {
+              content: [],
+              structuredContent: {
+                taskId: "video-job",
+                startFrame: { url: "https://cdn.example.com/approved.jpg" },
+                posterUrl: "https://cdn.example.com/poster.jpg",
+                videoUrl: "https://cdn.example.com/generated.mp4",
+              },
+            };
+          },
+        },
+      }),
+    },
+  );
+  const job = await f.tasks.start("alice", {
+    ...input,
+    providerId: "runway",
+    providerName: "Runway",
+    mode: "extend",
+  });
+  await until(() => f.tasks.get("alice", job.id).state === "awaiting-approval");
+  assert.deepEqual(events, []);
+  const review = f.tasks.get("alice", job.id).report;
+  await f.tasks.approve("alice", job.id, {
+    reportId: review.id,
+    approved: true,
+    acknowledgeEstimatedCost: true,
+  });
+  await until(() => f.tasks.get("alice", job.id).state === "completed");
+  assert.equal(f.planner.failure, undefined);
+  assert.deepEqual(events, ["extract", "upload", "generate"]);
+  assert.equal(f.tasks.get("alice", job.id).outputs.length, 1);
+  assert.equal(
+    f.tasks.get("alice", job.id).outputs[0].url,
+    "https://cdn.example.com/generated.mp4",
+  );
+});
 test("Codex cannot generate or share before exact approval; modified and repeated calls are blocked", async (t) => {
   const f = await fixture(t, async (rpc) => {
     const early = await rpc.request("editor_magnific_images_generate", args);
@@ -205,7 +407,7 @@ test("Codex cannot generate or share before exact approval; modified and repeate
     (e) => e.status === 404,
   );
 });
-test("decline/cancel never calls a provider; restarted pending tasks do not resume billing", async (t) => {
+test("decline/cancel never calls a provider; restarted untouched proposals require fresh review", async (t) => {
   const f = await fixture(t, async (rpc) => {
     await rpc.request("moa_review", report);
     await rpc.request("editor_magnific_images_generate", args);
@@ -214,12 +416,107 @@ test("decline/cancel never calls a provider; restarted pending tasks do not resu
   const job = await f.tasks.start("alice", input);
   await until(() => f.tasks.get("alice", job.id).state === "awaiting-approval");
   const recovered = createCodexTasks(f.config);
+  await f.persisted(job.id, "awaiting-approval");
   const records = await recovered.list("alice");
-  assert.equal(records[0].state, "interrupted");
+  assert.equal(records[0].state, "awaiting-approval");
+  assert.ok(records[0].report.expiresAt < Date.now());
   await f.tasks.cancel("alice", job.id);
   await new Promise((r) => setTimeout(r, 30));
   assert.equal(f.calls, 0);
   assert.equal(f.prepared, 0);
+});
+test("expired review renews the exact work without execution; stale, duplicate and foreign approvals fail", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const f = await fixture(t, async (rpc) => {
+    if (!rpc.turnInput.approvedReport) {
+      void rpc.request("moa_review", report);
+      await until(() => Boolean(f.tasks.get("alice", job.id).report));
+    } else {
+      assert.deepEqual(rpc.turnInput.approvedReport.calls, report.calls);
+      assert.equal(
+        (await rpc.request("editor_magnific_images_generate", args)).success,
+        true,
+      );
+    }
+    rpc.finish();
+  });
+  const job = await f.tasks.start("alice", input);
+  await until(() => f.tasks.get("alice", job.id).state === "awaiting-approval");
+  await new Promise((r) => setTimeout(r, 30));
+  const original = f.tasks.get("alice", job.id).report;
+  await assert.rejects(
+    f.tasks.renew("alice", job.id, { reportId: original.id }),
+    (e) => e.status === 409,
+  );
+  t.mock.timers.tick(10 * 60000 + 1);
+  const consent = { approved: true, acknowledgeEstimatedCost: true };
+  await assert.rejects(
+    f.tasks.approve("alice", job.id, { ...consent, reportId: original.id }),
+    (e) => e.status === 409,
+  );
+  const restarted = createCodexTasks(f.config);
+  await restarted.list("alice");
+  await assert.rejects(
+    restarted.renew("bob", job.id, { reportId: original.id }),
+    (e) => e.status === 404,
+  );
+  const results = await Promise.allSettled([
+    restarted.renew("alice", job.id, { reportId: original.id }),
+    restarted.renew("alice", job.id, { reportId: original.id }),
+  ]);
+  assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
+  const renewed = restarted.get("alice", job.id);
+  assert.notEqual(renewed.report.id, original.id);
+  assert.deepEqual(renewed.report.calls, original.calls);
+  assert.deepEqual(renewed.references, job.references);
+  assert.equal(renewed.report.summary, original.summary);
+  assert.equal(renewed.reportHistory.at(-1).status, "expired");
+  assert.equal(f.calls, 0);
+  assert.equal(f.prepared, 0);
+  await assert.rejects(
+    restarted.approve("alice", job.id, { ...consent, reportId: original.id }),
+    (e) => e.status === 409,
+  );
+  await restarted.approve("alice", job.id, {
+    ...consent,
+    reportId: renewed.report.id,
+  });
+  await until(() => restarted.get("alice", job.id).state === "completed");
+  assert.equal(f.planner.failure, undefined);
+  assert.equal(f.calls, 1);
+  await assert.rejects(
+    restarted.renew("alice", job.id, { reportId: renewed.report.id }),
+    (e) => e.status === 409,
+  );
+});
+test("restarting an approved task never recovers a runnable approval or permits renewal", async (t) => {
+  let release;
+  const hold = new Promise((resolve) => {
+    release = resolve;
+  });
+  const f = await fixture(t, async (rpc) => {
+    await rpc.request("moa_review", report);
+    await hold;
+    rpc.finish();
+  });
+  const job = await f.tasks.start("alice", input);
+  await until(() => f.tasks.get("alice", job.id).state === "awaiting-approval");
+  const pending = f.tasks.get("alice", job.id).report;
+  await f.tasks.approve("alice", job.id, {
+    reportId: pending.id,
+    approved: true,
+    acknowledgeEstimatedCost: true,
+  });
+  const restarted = createCodexTasks(f.config);
+  const [record] = await restarted.list("alice");
+  assert.equal(record.state, "interrupted");
+  await assert.rejects(
+    restarted.renew("alice", job.id, { reportId: pending.id }),
+    (e) => e.status === 409,
+  );
+  assert.equal(f.calls, 0);
+  release();
+  await until(() => f.tasks.get("alice", job.id).state === "completed");
 });
 test("call authorization is stable under object key order and captures array/value changes", () => {
   assert.equal(
@@ -241,6 +538,19 @@ test("output extraction only accepts HTTPS links from tool results", () => {
       _meta: { url: "https://private.example.com/ignore" },
     }),
     ["https://cdn.example.com/x.mp4"],
+  );
+});
+test("provider-echoed reference images are not treated as generated outputs", () => {
+  assert.deepEqual(
+    outputLinks({
+      structuredContent: {
+        startFrame: { url: "https://cdn.example.com/input.jpg" },
+        referenceImages: [{ url: "https://cdn.example.com/reference.jpg" }],
+        input: { url: "https://cdn.example.com/original.mp4" },
+        output: [{ url: "https://cdn.example.com/generated.mp4" }],
+      },
+    }),
+    ["https://cdn.example.com/generated.mp4"],
   );
 });
 test("reference shares are revocable; media downloads reject private targets and private redirects", async () => {

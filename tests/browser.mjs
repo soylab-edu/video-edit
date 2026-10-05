@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import fs from "node:fs/promises";
 const browser = await chromium.launch({
-  executablePath: process.env.CHROMIUM_PATH || "/usr/bin/chromium",
+  ...(process.env.CHROMIUM_PATH
+    ? { executablePath: process.env.CHROMIUM_PATH }
+    : {}),
   headless: true,
   args: ["--no-sandbox"],
 });

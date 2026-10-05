@@ -504,11 +504,11 @@ small {
 }
 .asset-add {
   position: absolute;
-  top: 4px;
-  right: 4px;
+  top: 6px;
+  right: 37px;
   background: #151d1cbb;
-  width: 21px;
-  height: 21px;
+  width: 25px;
+  height: 25px;
   border-radius: 4px;
   display: flex;
   align-items: center;
@@ -3335,8 +3335,11 @@ kbd {
 .codex-task-review ol { padding-left: 20px; }
 .codex-task-review li { margin: 12px 0; }
 .codex-task-review pre { max-height: 170px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 10px; }
-.task-consent { display: flex; gap: 9px; align-items: flex-start; margin: 16px 0; }
-.task-consent input { margin-top: 5px; flex-shrink: 0; }
+.task-work-title { font-size: 14px; line-height: 1.6; }
+.task-credit-estimate { margin: 12px 0; }
+.task-review-details { margin-top: 14px; font-size: 12px; }
+.task-review-details > summary { cursor: pointer; color: #c3d4c4; }
 .task-message { font-size: 12px; line-height: 1.9; white-space: pre-wrap; overflow-wrap: anywhere; padding: 14px; background: #14231b; border-radius: 7px; }
 .task-output { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-top: 12px; font-size: 12px; }
 @media (max-width: 600px) { .account-apps { padding: 16px; } .account-apps-grid { grid-template-columns: 1fr; } }
+.task-reference-preview { display: block; width: 100%; max-height: 220px; object-fit: contain; margin: 8px 0; border-radius: 8px; }

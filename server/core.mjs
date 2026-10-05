@@ -4,8 +4,8 @@ import { spawn } from "node:child_process";
 export function decodeFilename(name) {
   // Browsers send UTF-8 multipart filenames; Busboy may decode headers as Latin-1.
   if ([...name].some((character) => character.charCodeAt(0) > 255)) return name;
-  const decoded = Buffer.from(name, 'latin1').toString('utf8');
-  return decoded.includes('\ufffd') ? name : decoded;
+  const decoded = Buffer.from(name, "latin1").toString("utf8");
+  return decoded.includes("\ufffd") ? name : decoded;
 }
 
 export const clipSchema = z
@@ -56,6 +56,7 @@ export function run(
 ) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
+      windowsHide: true,
       ...options,
       stdio: ["ignore", "pipe", "pipe"],
     });

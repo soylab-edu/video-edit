@@ -22,11 +22,13 @@ export async function listCodexApps({
   home,
   cwd,
   binary = codexExecutable(),
+  binaryArgs = [],
   timeout = 60000,
 }) {
   const child = spawn(
     binary,
     [
+      ...binaryArgs,
       "-c",
       'cli_auth_credentials_store="file"',
       "--enable",

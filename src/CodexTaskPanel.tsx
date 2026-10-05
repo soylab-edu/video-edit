@@ -10,9 +10,10 @@ type Task = {
   error?: string;
   activities: string[];
   outputs: { id: string; url: string; tool: string }[];
-  references: { name: string; kind: string }[];
+  references: { name: string; kind: string; time?: number }[];
   report?: {
     id: string;
+    title?: string;
     summary: string;
     calls: {
       tool: string;
@@ -28,6 +29,42 @@ type Task = {
 };
 const active = (task: Task | null) =>
   !!task && ["starting", "running", "awaiting-approval"].includes(task.state);
+function workTitle(task: Task) {
+  const report = task.report!;
+  if (report.title) return report.title;
+  const video = report.calls.find((call) => /generate_video$/.test(call.tool));
+  if (
+    video &&
+    report.calls.every(
+      (call) =>
+        call === video || call.tool === "editor_moa_runway_upload_reference",
+    )
+  ) {
+    const args = video.arguments as Record<string, unknown>;
+    const model = args.model === "hailuo-3" ? "H3" : String(args.model || "");
+    const settings = [
+      args.duration ? `${args.duration}초` : "",
+      args.resolution,
+      args.ratio,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    const source = args.startFrame
+      ? "선택한 프레임을 첫 프레임으로 사용해 "
+      : "";
+    return `${source}${model} 영상 1개 생성${settings ? ` (${settings})` : ""}`;
+  }
+  return report.calls
+    .map((call) => call.purpose.split(/[.。\n]/)[0].slice(0, 100))
+    .join(" · ");
+}
+function creditEstimate(task: Task) {
+  const calls = task.report!.calls;
+  const known = calls.filter((call) => call.estimatedCredits !== null);
+  if (!known.length) return "확인 불가";
+  const total = known.reduce((sum, call) => sum + call.estimatedCredits!, 0);
+  return `${total.toLocaleString()} 크레딧${known.length < calls.length ? " + 미확인 비용" : " (예상)"}`;
+}
 export function CodexTaskPanel({
   app,
   assets,
@@ -47,7 +84,8 @@ export function CodexTaskPanel({
   const [task, setTask] = useState<Task | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [consent, setConsent] = useState(false);
+  const [now, setNow] = useState(Date.now);
+  const reviewExpired = !!task?.report && task.report.expiresAt <= now;
   useEffect(() => {
     let current = true;
     void api<Task[]>("/codex-tasks")
@@ -68,7 +106,12 @@ export function CodexTaskPanel({
     }, 1500);
     return () => clearInterval(timer);
   }, [task?.id, task?.state]);
-  useEffect(() => setConsent(false), [task?.report?.id]);
+  useEffect(() => {
+    if (task?.state !== "awaiting-approval") return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [task?.state, task?.report?.id]);
   async function action(fn: () => Promise<void>) {
     setBusy(true);
     setError("");
@@ -83,6 +126,17 @@ export function CodexTaskPanel({
   async function start() {
     await action(async () => {
       let refs: { assetId: string; kind: string; time?: number }[] = [];
+      if (mode === "extend") {
+        const last = project.clips.at(-1);
+        if (!last) throw new Error("이어 만들 마지막 클립이 필요합니다.");
+        refs = [
+          {
+            assetId: last.assetId,
+            kind: "image",
+            time: Math.max(last.in, last.out - 1 / 24),
+          },
+        ];
+      }
       if (mode === "f2f") {
         const left = project.clips[boundary],
           right = project.clips[boundary + 1];
@@ -155,12 +209,21 @@ export function CodexTaskPanel({
             참조 방식
             <select value={mode} onChange={(e) => setMode(e.target.value)}>
               <option value="none">텍스트로 요청</option>
+              <option value="extend" disabled={!project.clips.length}>
+                마지막 프레임에서 이어 만들기
+              </option>
               <option value="f2f" disabled={project.clips.length < 2}>
                 F2F · 앞 컷 끝과 뒤 컷 시작
               </option>
               <option value="refs">Omni / Ref · 선택한 소재</option>
             </select>
           </label>
+          {mode === "extend" && (
+            <p className="muted small">
+              타임라인 마지막 클립 ‘{project.clips.at(-1)?.name}’의 트림된 끝
+              프레임을 전송합니다.
+            </p>
+          )}
           {mode === "f2f" && (
             <label className="form-label">
               연결할 컷
@@ -220,20 +283,20 @@ export function CodexTaskPanel({
       {task && (
         <div className="codex-task-progress">
           <p role="status">
-            {active(task) && <LoaderCircle size={14} className="spin" />}{" "}
+            {["starting", "running"].includes(task.state) && (
+              <LoaderCircle size={14} className="spin" />
+            )}{" "}
             {task.state === "awaiting-approval"
-              ? "전체 작업 보고서 · 승인 대기"
+              ? "승인 대기"
               : task.state === "running" || task.state === "starting"
                 ? "Codex 작업 중"
                 : task.state === "completed"
                   ? "작업 응답 완료"
                   : "작업 중단·확인 필요"}
           </p>
-          {task.activities.slice(-3).map((text, i) => (
-            <p className="muted small" key={i}>
-              {text}
-            </p>
-          ))}
+          {task.state === "running" && task.activities.at(-1) && (
+            <p className="muted small">{task.activities.at(-1)}</p>
+          )}
           {task.report && (
             <div className="codex-task-review">
               <h4>
@@ -242,80 +305,131 @@ export function CodexTaskPanel({
                   ? "승인한 작업"
                   : "실행 전 확인"}
               </h4>
-              <p>{task.report.summary}</p>
-              <ol>
-                {task.report.calls.map((call, i) => (
-                  <li key={i}>
-                    <strong>{call.purpose}</strong>
-                    <p>
-                      Codex 예상 비용:{" "}
-                      {call.estimatedCredits === null
-                        ? "확인되지 않음"
-                        : `${call.estimatedCredits} 크레딧`}
-                    </p>
-                    <p className="muted small">
-                      {call.pricingSource || "제공업체 확정 견적 없음"}
-                    </p>
-                    <details>
-                      <summary>전송할 설정 확인</summary>
-                      <pre>{JSON.stringify(call.arguments, null, 2)}</pre>
-                    </details>
-                  </li>
-                ))}
-              </ol>
-              <p className="small">
-                전송 소재:{" "}
-                {task.references.length
-                  ? task.references.map((r) => r.name).join(", ")
-                  : "없음 · 요청 텍스트 전송"}
-              </p>
-              <p>
+              <p className="task-work-title">{workTitle(task)}</p>
+              <p className="task-credit-estimate">
                 <strong>
-                  {task.report.calls.every((c) => c.estimatedCredits === null)
-                    ? "전체 비용 미확인"
-                    : `알려진 예상 합계: ${task.report.calls.reduce((sum, c) => sum + (c.estimatedCredits || 0), 0)} 크레딧`}
-                  {task.report.calls.some((c) => c.estimatedCredits === null)
-                    ? ` · 미확인 ${task.report.calls.filter((c) => c.estimatedCredits === null).length}건`
-                    : ""}
+                  {app.name} 예상 소모: {creditEstimate(task)}
                 </strong>
               </p>
-              {task.report.followUp && <p>{task.report.followUp}</p>}
               {task.state === "awaiting-approval" && (
                 <>
-                  <label className="task-consent">
-                    <input
-                      type="checkbox"
-                      checked={consent}
-                      onChange={(e) => setConsent(e.target.checked)}
-                    />{" "}
-                    예상액은 확정 견적이 아니며 미확인 비용이 있을 수 있음을
-                    확인했습니다. 위 작업과 선택한 소재 전송, 제공업체 크레딧
-                    사용을 승인합니다.
-                  </label>
-                  <button
-                    className="primary full"
-                    disabled={
-                      !consent || busy || task.report.expiresAt < Date.now()
-                    }
-                    onClick={() =>
-                      void action(async () =>
-                        setTask(
-                          await api("/codex-tasks/" + task.id + "/approve", {
-                            reportId: task.report!.id,
-                            approved: true,
-                            acknowledgeEstimatedCost: true,
-                          }),
-                        ),
-                      )
-                    }
-                  >
-                    승인한 작업만 실행
-                  </button>
+                  <p className="muted small">
+                    승인하면{" "}
+                    {task.references.length ? "선택한 소재와 요청을" : "요청을"}{" "}
+                    {app.name}로 전송하고 크레딧을 사용합니다.
+                  </p>
+                  {reviewExpired ? (
+                    <>
+                      <p className="small" role="status">
+                        확인 유효시간(10분)이 지났습니다. 같은 내용으로 갱신해
+                        주세요.
+                      </p>
+                      <button
+                        className="primary full"
+                        disabled={busy}
+                        onClick={() =>
+                          void action(async () =>
+                            setTask(
+                              await api("/codex-tasks/" + task.id + "/renew", {
+                                reportId: task.report!.id,
+                              }),
+                            ),
+                          )
+                        }
+                      >
+                        확인 내용 갱신
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <p>승인하시겠습니까?</p>
+                      <button
+                        className="primary full"
+                        disabled={busy}
+                        onClick={() =>
+                          void action(async () =>
+                            setTask(
+                              await api(
+                                "/codex-tasks/" + task.id + "/approve",
+                                {
+                                  reportId: task.report!.id,
+                                  approved: true,
+                                  acknowledgeEstimatedCost: true,
+                                },
+                              ),
+                            ),
+                          )
+                        }
+                      >
+                        승인하고 실행
+                      </button>
+                    </>
+                  )}
                 </>
               )}
+              <details className="task-review-details">
+                <summary>세부 내용 보기</summary>
+                <p>{task.report.summary}</p>
+                <ol>
+                  {task.report.calls.map((call, i) => (
+                    <li key={i}>
+                      <strong>{call.purpose}</strong>
+                      <p>
+                        Codex 예상 비용:{" "}
+                        {call.estimatedCredits === null
+                          ? "확인되지 않음"
+                          : `${call.estimatedCredits} 크레딧`}
+                      </p>
+                      <p className="muted small">
+                        {call.pricingSource || "제공업체 확정 견적 없음"}
+                      </p>
+                      <details>
+                        <summary>전송할 설정 확인</summary>
+                        <pre>{JSON.stringify(call.arguments, null, 2)}</pre>
+                      </details>
+                    </li>
+                  ))}
+                </ol>
+                <p className="small">
+                  전송 소재:{" "}
+                  {task.references.length
+                    ? task.references
+                        .map(
+                          (r) =>
+                            r.name +
+                            (r.time === undefined
+                              ? ""
+                              : ` · ${r.time.toFixed(3)}초 프레임`),
+                        )
+                        .join(", ")
+                    : "없음 · 요청 텍스트 전송"}
+                </p>
+                {task.references.map(
+                  (ref, i) =>
+                    ref.kind === "image" && (
+                      <img
+                        key={i}
+                        className="task-reference-preview"
+                        src={`/api/codex-tasks/${task.id}/references/${i}`}
+                        alt={`${ref.name} 전송 프레임`}
+                      />
+                    ),
+                )}
+                {task.report.followUp && <p>{task.report.followUp}</p>}
+              </details>
             </div>
           )}
-          {task.message && <p className="task-message">{task.message}</p>}
+          {(task.message || task.activities.length > 0) && (
+            <details className="task-review-details">
+              <summary>작업 기록</summary>
+              {task.activities.map((text, i) => (
+                <p className="muted small" key={i}>
+                  {text}
+                </p>
+              ))}
+              {task.message && <p className="task-message">{task.message}</p>}
+            </details>
+          )}
           {task.error && (
             <p className="inline-error" role="alert">
               {task.error}
@@ -345,7 +459,7 @@ export function CodexTaskPanel({
                 )
               }
             >
-              작업 거절·중단
+              취소
             </button>
           )}
         </div>

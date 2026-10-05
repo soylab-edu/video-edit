@@ -6,11 +6,22 @@
 
 ## 접속
 
-외부 HTTPS 개인 작업실 접속·비밀번호 설정·Codex 로그인 방법은 [접속 안내](docs/access.md)를 참고하세요. 현재 클라우드 접속은 무료 임시 연결이며 고정 호스팅은 아닙니다. 로컬 개발 환경으로 이전할 때는 [로컬 이전 안내](docs/local-development.md)를 참고하세요. 실제 PC에서의 설치·실행은 아직 검증하지 않았습니다.
+Windows 로컬 편집기는 `start-moa.cmd` 또는 `npm.cmd run dev:local`로 실행하고 `http://127.0.0.1:5173`에서 사용합니다. [Windows 설치·실행 안내](docs/windows-development.md)를 참고하세요. 2026-10-05 Windows 11에서 설치, 업로드, 편집, 저장/복원, 한글 자막 MP4 출력, TTS와 BandIt을 검증했습니다. 사용자 승인 후 마지막 프레임 업로드 → Runway H3 생성 → 결과 가져오기 → 편집·내보내기도 실제로 확인했습니다. 설치형 `.exe` 패키지는 아직 구현하지 않았습니다.
+
+외부 HTTPS 개인 작업실 접속·비밀번호 설정·Codex 로그인 방법은 [접속 안내](docs/access.md)를 참고하세요. 현재 클라우드 접속은 무료 임시 연결이며 고정 호스팅은 아닙니다. 클라우드 자료를 로컬로 이전할 때는 [로컬 이전 안내](docs/local-development.md)를 참고하세요.
 
 ## 개발 실행
 
-Node 24+, Python 3.12, FFmpeg 7+, `uv`, Noto Sans CJK가 필요합니다. 이 클라우드 환경에는 설치되어 있습니다.
+Node 24+, Python 3.12, FFmpeg 7+, `uv`가 필요합니다. Windows 설치 스크립트는 기존 Python으로 `uv`를 설치하고 Python 3.12 가상 환경을 준비합니다. 자막 폰트는 Windows의 맑은 고딕 Bold, Linux의 Noto Sans CJK를 사용하며 `MOA_FONT`로 지정할 수 있습니다.
+
+```powershell
+./scripts/setup-windows.ps1
+npm.cmd run dev:local
+npm.cmd test
+npm.cmd run test:windows
+```
+
+Linux/클라우드 개발:
 
 ```bash
 cd /workspace/video-edit

@@ -31,7 +31,19 @@ import { createShares, downloadOutput } from "./media-transfer.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DATA = path.resolve(process.env.MOA_DATA_DIR || path.join(ROOT, ".data"));
-const PYTHON = process.env.MOA_PYTHON || path.join(ROOT, ".venv/bin/python");
+const PYTHON =
+  process.env.MOA_PYTHON ||
+  path.join(
+    ROOT,
+    process.platform === "win32"
+      ? ".venv/Scripts/python.exe"
+      : ".venv/bin/python",
+  );
+const TITLE_FONT =
+  process.env.MOA_FONT ||
+  (process.platform === "win32"
+    ? path.join(process.env.WINDIR || "C:/Windows", "Fonts/malgunbd.ttf")
+    : "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc");
 await fs.mkdir(DATA, { recursive: true });
 const app = express(),
   jobs = new Map(),
@@ -123,6 +135,7 @@ const codexTasks = createCodexTasks({
   home: codexLogin.home,
   userDir,
   connected: codexLogin.connected,
+  prepareReferenceFile: referenceFile,
   onFinish: (task) => shares.revoke(task.id),
   prepareReferences: async (task) => {
     if (!task.references.length) return {};
@@ -182,7 +195,7 @@ const codexTasks = createCodexTasks({
 const codexTaskInput = z.object({
   providerId: z.enum(["runway", "magnific", "heygen", "pixverse"]),
   prompt: z.string().min(3).max(4000),
-  mode: z.enum(["none", "f2f", "refs"]).default("none"),
+  mode: z.enum(["none", "f2f", "refs", "extend"]).default("none"),
   references: z
     .array(
       z.object({
@@ -203,6 +216,11 @@ app.post(
   asyncRoute(async (req, res) => {
     const input = codexTaskInput.parse(req.body);
     const references = [];
+    if (
+      input.mode === "extend" &&
+      (input.references.length !== 1 || input.references[0].kind !== "image")
+    )
+      throw new Error("이어 만들기에는 마지막 프레임 한 장이 필요합니다.");
     if (
       input.mode === "f2f" &&
       (input.references.length !== 2 ||
@@ -239,6 +257,62 @@ app.get(
   "/api/codex-tasks/:id",
   asyncRoute(async (req, res) =>
     res.json(codexTasks.get(req.owner, req.params.id)),
+  ),
+);
+app.get(
+  "/api/codex-tasks/:id/references/:index",
+  asyncRoute(async (req, res) => {
+    const task = codexTasks.get(req.owner, req.params.id);
+    const index = z.coerce.number().int().min(0).max(5).parse(req.params.index);
+    const ref = task.references[index];
+    if (!ref || ref.kind !== "image") return res.status(404).end();
+    const material = await referenceFile({ ...task, owner: req.owner }, ref);
+    res
+      .set("Cache-Control", "no-store")
+      .type(material.mimeType)
+      .sendFile(material.file, { dotfiles: "allow" });
+  }),
+);
+async function referenceFile(task, ref) {
+  const asset = await getAsset(task.owner, ref.assetId);
+  if (asset.deleted) throw new Error("선택한 참조 소재가 삭제되었습니다.");
+  let file = assetPath(task.owner, asset);
+  let mimeType = asset.type === "audio" ? "audio/mp4" : "video/mp4";
+  if (ref.kind === "image") {
+    const dir = path.join(userDir(task.owner), "codex-references", task.id);
+    await fs.mkdir(dir, { recursive: true });
+    file = path.join(
+      dir,
+      `${task.references.findIndex((r) => r.url === ref.url)}.jpg`,
+    );
+    mimeType = "image/jpeg";
+    if (!existsSync(file)) {
+      const temp = path.join(dir, randomUUID() + ".jpg");
+      try {
+        await run("ffmpeg", [
+          "-y",
+          "-ss",
+          String(ref.time || 0),
+          "-i",
+          assetPath(task.owner, asset),
+          "-frames:v",
+          "1",
+          "-vf",
+          "scale=1280:-1",
+          temp,
+        ]);
+        await fs.rename(temp, file);
+      } finally {
+        await fs.rm(temp, { force: true });
+      }
+    }
+  }
+  return { file, mimeType };
+}
+app.post(
+  "/api/codex-tasks/:id/renew",
+  asyncRoute(async (req, res) =>
+    res.json(await codexTasks.renew(req.owner, req.params.id, req.body)),
   ),
 );
 app.post(
@@ -982,13 +1056,15 @@ async function exportProject(owner, project, job) {
     });
     filter += `${audioLabels}amix=inputs=${project.audio.length + 1}:duration=first:normalize=0${project.normalize ? ",loudnorm=I=-16:TP=-1.5:LRA=11" : ""}[outa]`;
     const titles = [];
+    if (project.titles.some((t) => t.end > t.start))
+      await fs.copyFile(TITLE_FONT, path.join(work, "subtitle-font.ttf"));
     for (let i = 0; i < project.titles.length; i++) {
       const t = project.titles[i];
       if (t.end <= t.start) continue;
       const textfile = path.join(work, `title${i}.txt`);
       await fs.writeFile(textfile, t.text);
       titles.push(
-        `drawtext=fontfile=/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc:textfile='${textfile}':expansion=none:fontsize=${Math.round(w * 0.047)}:fontcolor=white:shadowcolor=black@0.4:shadowx=2:shadowy=2:x=(w-tw)/2:y=h*0.78:enable='between(t,${t.start},${t.end})'`,
+        `drawtext=fontfile=subtitle-font.ttf:textfile=title${i}.txt:expansion=none:fontsize=${Math.round(w * 0.047)}:fontcolor=white:shadowcolor=black@0.4:shadowx=2:shadowy=2:x=(w-tw)/2:y=h*0.78:enable='between(t,${t.start},${t.end})'`,
       );
     }
     if (titles.length) filter += `;[0:v]${titles.join(",")}[outv]`;
@@ -1003,6 +1079,10 @@ async function exportProject(owner, project, job) {
       "[outa]",
       "-t",
       String(duration(project)),
+      "-r",
+      "24",
+      "-fps_mode",
+      "cfr",
       "-c:v",
       "libx264",
       "-preset",
@@ -1016,7 +1096,9 @@ async function exportProject(owner, project, job) {
       out,
     );
     job.progress = 80;
-    await run("ffmpeg", args, { timeout: 600000 });
+    // Relative filter filenames avoid drive-letter, backslash and quote escaping
+    // in FFmpeg's filter parser, including workspaces with Unicode names.
+    await run("ffmpeg", args, { timeout: 600000, cwd: work });
     return {
       url: `/media/${id}.mp4`,
       name: project.name + ".mp4",
@@ -1791,6 +1873,6 @@ app.use((error, req, res, next) => {
 });
 app.listen(
   Number(process.env.PORT || 3001),
-  process.env.MOA_HOST || "0.0.0.0",
+  process.env.MOA_HOST || "127.0.0.1",
   () => console.log(`Moa API listening on ${process.env.PORT || 3001}`),
 );

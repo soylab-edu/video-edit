@@ -6,10 +6,12 @@
 
 ## 실행 방식
 
-이 앱은 FFmpeg·Python·BandIt·Linux 한글 폰트 경로를 사용하므로, 운영체제마다 의존성을 따로 설치하기보다 Docker Desktop(Windows/macOS) 또는 Docker Engine + Compose(Linux)를 사용하는 방식으로 준비되어 있습니다. Docker 구성은 아직 실제 PC에서 빌드·실행하지 않은 초안입니다. 설치 완료나 동작 보장으로 해석하지 마세요.
+Windows에서는 Docker 없이 Node.js·FFmpeg·Python을 직접 사용하는 실행 경로를 검증했습니다. `scripts/setup-windows.ps1`로 의존성을 준비하고 `start-moa.cmd`로 실행합니다. [Windows 개발 환경 안내](windows-development.md)에 상세 명령과 검증 기록이 있습니다.
+
+Docker Desktop(Windows/macOS) 또는 Docker Engine + Compose(Linux)는 선택적인 개발 방법입니다. Docker 구성은 아직 실제 PC에서 빌드·실행하지 않은 초안입니다. 아래 단계는 Docker 방법이며, 네이티브 Windows 실행기는 별도로 위 안내를 따릅니다.
 
 1. 로컬 폴더에 최신 소스를 풀고 Docker를 실행합니다.
-2. Windows는 `start-moa.cmd`, macOS는 `start-moa.command`를 실행합니다. Linux는 프로젝트 폴더에서 아래 명령을 사용합니다.
+2. macOS는 `start-moa.command`를 실행합니다. Windows/Linux의 Docker 방법은 프로젝트 폴더에서 아래 명령을 사용합니다.
 
    ```bash
    docker compose up -d --build --wait --wait-timeout 180
@@ -20,7 +22,7 @@
 4. Codex 연결은 이 로컬 작업실에서 사용자가 직접 ChatGPT 로그인을 승인합니다. 클라우드 로그인 토큰을 소스에 넣거나 자동 복사하지 않습니다.
 5. 코드 변경 후 같은 Compose 명령으로 다시 빌드할 수 있습니다. 이 방식은 자동 갱신되는 개발 서버가 아니라 재빌드 방식입니다. 중지는 `docker compose stop`, 다시 실행은 `docker compose up -d`입니다. 데이터 보존을 위해 `docker compose down -v`를 실행하지 마세요.
 
-첫 빌드에는 Python/PyTorch 설치와 약 446 MB의 BandIt 체크포인트 다운로드가 포함되어 오래 걸릴 수 있습니다. 현재 Compose는 `linux/amd64`로 지정되어 있어 Apple Silicon에서는 에뮬레이션이 필요할 수 있습니다. PC의 운영체제·CPU와 사용 가능한 자원을 확인한 뒤 조정·검증하세요. 로컬 실행은 인터넷에 공개되지 않으며, 유료 플러그인에 참조 소재를 전달하려면 별도의 승인된 공개 HTTPS 전송 경로도 필요합니다.
+첫 빌드에는 Python/PyTorch 설치와 약 446 MB의 BandIt 체크포인트 다운로드가 포함되어 오래 걸릴 수 있습니다. 현재 Compose는 `linux/amd64`로 지정되어 있어 Apple Silicon에서는 에뮬레이션이 필요할 수 있습니다. PC의 운영체제·CPU와 사용 가능한 자원을 확인한 뒤 조정·검증하세요. 로컬 실행은 인터넷에 공개되지 않습니다. Runway는 승인된 선택 소재를 직접 업로드하는 경로를 구현했으며, 다른 제공업체에 참조 소재를 전달하려면 별도의 승인된 HTTPS 전송 경로가 필요합니다.
 
 ## 기존 작업 자료
 

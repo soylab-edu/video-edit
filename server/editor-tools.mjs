@@ -1,4 +1,5 @@
 import { CodexRpc } from "./codex-rpc.mjs";
+import { localPixverseStatus } from "./local-pixverse.mjs";
 
 export const EDITOR_PROVIDERS = [
   {
@@ -39,6 +40,9 @@ const reads = new Set([
   "heygen.list_video_translation_languages",
 ]);
 const writes = new Set([
+  // Kept for the server-owned upload adapter; never exposed directly to the planner.
+  "runway.init_upload",
+  "runway.complete_upload",
   "runway.generate_video",
   "runway.generate_image",
   "runway.generate_sound_effect",
@@ -67,14 +71,25 @@ export function isReadTool(tool) {
 export function editableTools(tools) {
   return tools.filter((t) => reads.has(t.name) || writes.has(t.name));
 }
-export async function openExecutor({ home, cwd, Rpc = CodexRpc }) {
+export async function openExecutor({
+  home,
+  cwd,
+  Rpc = CodexRpc,
+  requestObserver = () => {},
+}) {
   const rpc = new Rpc({
     home,
     cwd,
-    onRequest: (m) =>
-      m.method === "mcpServer/elicitation/request"
+    onRequest: (m) => {
+      requestObserver({
+        method: m.method,
+        mode: m.params?.mode,
+        server: m.params?.serverName,
+      });
+      return m.method === "mcpServer/elicitation/request"
         ? { action: "decline", content: null }
-        : null,
+        : null;
+    },
   });
   try {
     await rpc.initialize();
@@ -172,6 +187,11 @@ export async function editorInventory(options, force = false) {
             supported.some((t) => t.providerId === p.id && !isReadTool(t)),
           toolCount: tools.filter((t) => t.providerId === p.id).length,
         });
+      }
+      const pixverse = apps.find((p) => p.id === "pixverse");
+      if (!pixverse.enabled && !options.Rpc) {
+        const local = await localPixverseStatus();
+        if (local) Object.assign(pixverse, local, { enabled: true });
       }
       return { tools: supported, apps };
     } finally {

@@ -17,7 +17,8 @@ async function fakeServer(t, program) {
   return {
     home: path.join(dir, "private-home"),
     cwd: dir,
-    binary,
+    binary: process.execPath,
+    binaryArgs: [binary],
     timeout: 3000,
   };
 }

@@ -10,6 +10,8 @@ export type EditorApp = {
   executionReady: boolean;
   authentication?: "verified" | "reauthentication" | "unverified";
   toolCount?: number;
+  source?: string;
+  installed?: boolean;
 };
 type Inventory = {
   state: "not-connected" | "checking" | "ready" | "error";
@@ -125,9 +127,14 @@ export function AccountApps({
               >
                 {app.executionReady
                   ? "실행 연결 확인됨"
-                  : app.authentication === "reauthentication"
-                    ? "제공업체 재인증 필요"
-                    : "실행 도구 확인 필요"}
+                  : app.source === "local-cli" &&
+                      app.authentication === "verified"
+                    ? "로컬 설치·인증 확인됨"
+                    : app.installed
+                      ? "로컬 플러그인 설치됨"
+                      : app.authentication === "reauthentication"
+                        ? "제공업체 재인증 필요"
+                        : "편집기 실행 연동 필요"}
               </span>
               <p>{app.description}</p>
               {app.executionReady ? (
@@ -147,7 +154,11 @@ export function AccountApps({
                   ChatGPT에서 연결 확인 ↗
                 </a>
               ) : (
-                <p>설치 여부와 별도로 이 서버의 호출 경로를 확인 중입니다.</p>
+                <p>
+                  {app.source === "local-cli"
+                    ? "로컬 PixVerse 플러그인을 찾았습니다. 편집기 안에서 생성하려면 CLI 실행 연동이 필요합니다."
+                    : "이 편집기에 실행 도구가 전달되지 않았습니다. ChatGPT 연결 상태와 별도로 확인이 필요합니다."}
+                </p>
               )}
             </div>
           </article>

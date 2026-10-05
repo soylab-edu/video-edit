@@ -13,7 +13,20 @@ export function codexEnvironment(home) {
     NO_COLOR: "1",
     TERM: "dumb",
     ...Object.fromEntries(
-      ["HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "SSL_CERT_FILE", "SSL_CERT_DIR"]
+      [
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "NO_PROXY",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "SystemRoot",
+        "WINDIR",
+        "USERPROFILE",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "TEMP",
+        "TMP",
+      ]
         .filter((k) => process.env[k])
         .map((k) => [k, process.env[k]]),
     ),
@@ -26,6 +39,8 @@ export function codexExecutable() {
     "linux-arm64": ["codex-linux-arm64", "aarch64-unknown-linux-musl"],
     "darwin-x64": ["codex-darwin-x64", "x86_64-apple-darwin"],
     "darwin-arm64": ["codex-darwin-arm64", "aarch64-apple-darwin"],
+    "win32-x64": ["codex-win32-x64", "x86_64-pc-windows-msvc"],
+    "win32-arm64": ["codex-win32-arm64", "aarch64-pc-windows-msvc"],
   };
   const target = targets[`${process.platform}-${process.arch}`];
   if (!target)
@@ -35,8 +50,9 @@ export function codexExecutable() {
     "vendor",
     target[1],
   );
-  const current = path.join(root, "bin", "codex");
-  return existsSync(current) ? current : path.join(root, "codex", "codex");
+  const executable = process.platform === "win32" ? "codex.exe" : "codex";
+  const current = path.join(root, "bin", executable);
+  return existsSync(current) ? current : path.join(root, "codex", executable);
 }
 export function createCodexLogin(userDir) {
   const pending = new Map();

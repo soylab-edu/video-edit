@@ -21,7 +21,7 @@ COPY package.json ./
 COPY server ./server
 COPY scripts ./scripts
 RUN git init .data/vendor/bandit && git -C .data/vendor/bandit remote add origin https://github.com/kwatcharasupat/bandit.git && git -C .data/vendor/bandit fetch --depth 1 origin 840d5eb9ede59d64569c423244547e58cb00f647 && git -C .data/vendor/bandit checkout --detach FETCH_HEAD && python scripts/setup-bandit.py --file dnr-3s-mus64-l1snr.ckpt --config dnr-3s-mus64-l1snr && python scripts/bandit-runner.py --check && mkdir -p /opt/moa-models && mv .data/vendor .data/models /opt/moa-models/ && useradd --uid 10001 --create-home moa && chown -R moa:moa /app/.data
-ENV NODE_ENV=production MOA_AUTH_MODE=required MOA_PYTHON=/usr/local/bin/python PORT=3001 MOA_MAX_JOBS=1
+ENV NODE_ENV=production MOA_AUTH_MODE=required MOA_HOST=0.0.0.0 MOA_PYTHON=/usr/local/bin/python PORT=3001 MOA_MAX_JOBS=1
 USER moa
 EXPOSE 3001
 HEALTHCHECK --interval=20s --timeout=5s --start-period=90s CMD node -e "fetch('http://127.0.0.1:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"

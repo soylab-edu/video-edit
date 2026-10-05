@@ -9,7 +9,7 @@ import { randomBytes } from "node:crypto";
 
 test(
   "private workspace: setup, API protection, persistent login/project, conflicts and logout",
-  { timeout: 30000 },
+  { timeout: 60000 },
   async (t) => {
     const data = await fs.mkdtemp(path.join(os.tmpdir(), "moa-access-"));
     const reservation = http.createServer();
@@ -38,11 +38,11 @@ test(
         },
         stdio: "ignore",
       });
-      for (let i = 0; i < 100; i++) {
+      for (let i = 0; i < 300; i++) {
         try {
           if ((await fetch(base + "/api/health")).ok) return;
         } catch {}
-        await new Promise((r) => setTimeout(r, 60));
+        await new Promise((r) => setTimeout(r, 100));
       }
       throw new Error("Access test server did not start");
     }

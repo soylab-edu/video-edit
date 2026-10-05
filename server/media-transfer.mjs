@@ -44,6 +44,23 @@ export function privateAddress(ip) {
     (a[0] === 100 && a[1] >= 64 && a[1] <= 127)
   );
 }
+export async function publicHttps(value, lookup = dns.lookup) {
+  const url = new URL(value);
+  if (
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    (url.port && url.port !== "443")
+  )
+    throw new Error("공개 HTTPS 주소가 필요합니다.");
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  const addresses = net.isIP(host)
+    ? [{ address: host }]
+    : await lookup(host, { all: true });
+  if (!addresses.length || addresses.some((a) => privateAddress(a.address)))
+    throw new Error("내부 네트워크로 소재를 전송할 수 없습니다.");
+  return url;
+}
 export async function downloadOutput(
   value,
   file,
