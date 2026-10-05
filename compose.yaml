@@ -1,0 +1,16 @@
+services:
+  editor:
+    build: .
+    platform: linux/amd64
+    init: true
+    ports:
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - moa-workspace:/app/.data
+    environment:
+      COOKIE_SECURE: "0"
+      MOA_MAX_JOBS: "1"
+    restart: unless-stopped
+    stop_grace_period: 30s
+volumes:
+  moa-workspace:

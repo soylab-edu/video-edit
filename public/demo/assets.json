@@ -1,0 +1,48 @@
+[
+  {
+    "id": "demo-0",
+    "name": "01 · 길 위의 시작",
+    "type": "video",
+    "url": "/demo/scene-0.mp4",
+    "thumbnail": "/demo/scene-0.jpg",
+    "duration": 8,
+    "hasAudio": false,
+    "width": 960,
+    "height": 540,
+    "demo": true
+  },
+  {
+    "id": "demo-1",
+    "name": "02 · 느리게 흘러가는 시간",
+    "type": "video",
+    "url": "/demo/scene-1.mp4",
+    "thumbnail": "/demo/scene-1.jpg",
+    "duration": 8,
+    "hasAudio": false,
+    "width": 960,
+    "height": 540,
+    "demo": true
+  },
+  {
+    "id": "demo-2",
+    "name": "03 · 새로운 풍경",
+    "type": "video",
+    "url": "/demo/scene-2.mp4",
+    "thumbnail": "/demo/scene-2.jpg",
+    "duration": 6,
+    "hasAudio": false,
+    "width": 960,
+    "height": 540,
+    "demo": true
+  },
+  {
+    "id": "demo-music",
+    "name": "Slow morning · 앰비언트",
+    "type": "audio",
+    "url": "/demo/ambient.m4a",
+    "thumbnail": "",
+    "duration": 22,
+    "hasAudio": true,
+    "demo": true
+  }
+]

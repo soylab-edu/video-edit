@@ -1,0 +1,4 @@
+{$MOA_DOMAIN} {
+  encode zstd gzip
+  reverse_proxy editor:3001
+}

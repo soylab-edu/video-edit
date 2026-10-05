@@ -1,0 +1,24 @@
+# Use after mapping your own domain to this server: docker compose -f compose.yaml -f compose.server.yaml up -d --build
+services:
+  editor:
+    environment:
+      COOKIE_SECURE: "1"
+      MOA_ALLOWED_ORIGINS: "https://${MOA_DOMAIN:?Set MOA_DOMAIN to your domain}"
+  https:
+    image: caddy:2.10.2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      MOA_DOMAIN: "${MOA_DOMAIN:?Set MOA_DOMAIN to your domain}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - moa-certificates:/data
+      - moa-caddy-config:/config
+    depends_on:
+      editor:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  moa-certificates:
+  moa-caddy-config:

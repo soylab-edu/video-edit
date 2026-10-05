@@ -1,0 +1,10 @@
+.git
+.data
+.venv
+node_modules
+dist
+test-results
+.env*
+*.log
+*.tsbuildinfo
+releases
